@@ -170,7 +170,6 @@ class HiveQLKernel(Kernel):
                 raise ConnectionNotCreated()
 
             sqls = sql_explode(sql_req)
-            html_return = ""
             for idx, sql in enumerate(sqls):
                 sql_validate(sql)
                 sql_str = sql_rewrite(sql, self.params['default_limit'])

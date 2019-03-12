@@ -107,6 +107,7 @@ def sql_is_table(sql_str):
 
 def sql_explode(sql_str):
     tmp = []
+    sql_str = sql_remove_comment(sql_str)
     for sql in sql_str.split(";"):
         if sql.strip() != "":
             tmp.append(sql.strip())
@@ -114,6 +115,7 @@ def sql_explode(sql_str):
     
 
 def sql_validate(sql_str):
+    sql_str = sql_remove_comment(sql_str)
     if sql_is_set(sql_str) or sql_is_add(sql_str) or sql_is_drop(sql_str) or sql_is_create(sql_str) or sql_is_describe(sql_str) or sql_is_show(sql_str) or sql_is_use(sql_str) or sql_is_set_variable(sql_str) or sql_is_selection(sql_str) or sql_is_explain(sql_str):
         pass
     else:
