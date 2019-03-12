@@ -62,6 +62,7 @@ class HiveQLKernel(Kernel):
         'file_extension': '.hiveql',
     }
     last_conn = None
+    html = []
     params = {
         "default_limit": 20,
         "display_mode": "be"
@@ -142,8 +143,7 @@ class HiveQLKernel(Kernel):
                     raise KernelSyntaxError("Headers starting with %% must be at the beginning of your request.")
             else:
                 beginning = False
-                if not l.startswith("--"):
-                    sql_req += ' ' + l
+                sql_req += '\n' + l
 
         if self.last_conn is None and not headers and self.conf is not None:
             headers = self.conf  # if cells doesn't contain $$ and connection is None, overriding headers with conf data
@@ -169,53 +169,38 @@ class HiveQLKernel(Kernel):
             if self.last_conn is None:
                 raise ConnectionNotCreated()
 
-            # If code empty
-            if not sql_req:
-                return {
-                    'status': 'ok',
-                    'execution_count': self.execution_count,
-                    'payload': [],
-                    'user_expressions': {}
-                }
-            sql_req = sql_remove_comment(sql_req)
-            sql_validate(sql_req)
-            sql_str = sql_rewrite(sql_req, self.params['default_limit'])
-            logger.info("Running the following HiveQL query: {}".format(sql_req))
+            sqls = sql_explode(sql_req)
+            html_return = ""
+            for idx, sql in enumerate(sqls):
+                sql_validate(sql)
+                sql_str = sql_rewrite(sql, self.params['default_limit'])
+                logger.info("Running the following HiveQL query: {}".format(sql))
+                if sql_is_create(sql_str):
+                    self.last_conn.execute(sql_str)
+                    self.html.append("Table created!")
+                if sql_is_drop(sql_str):
+                    self.last_conn.execute(sql_str)
+                    self.html.append("Table dropped!")
+                if sql_is_use(sql_str):
+                    self.last_conn.execute(sql_str)
+                    self.html.append("Database changed!")
+                if sql_is_set_variable(sql_str):
+                    self.html.append("Variables set!")
+                if sql_is_table(sql_str):
+                    df = pd.read_sql(sql_str, self.last_conn)
+                    if sql_is_show(sql_str):
+                        if sql_is_show_tables(sql_str):
+                            self.html.append(df_to_html(df[df.tab_name.str.contains( extract_show_pattern(sql_str))]))
+                        if sql_is_show_databases(sql_str):
+                            self.html.append(df_to_html(df[df.database_name.str.contains( extract_show_pattern(sql_str))]))
+                else:
+                    self.html.append(df_to_html(df))
 
-            pd.set_option('display.max_colwidth', -1)
-            if sql_is_create(sql_req):
-                self.last_conn.execute(sql_str)
-                self.send_info("Table created!")
-                return { 'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {} }
-            if sql_is_drop(sql_req):
-                self.last_conn.execute(sql_str)
-                self.send_info("Table dropped!")
-                return { 'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {} }
-            if sql_is_use(sql_req):
-                self.last_conn.execute(sql_str)
-                self.send_info("Database changed!")
-                return { 'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {} }
-            if sql_is_set_variable(sql_req):
-                for s in sql_req.split(";"):
-                    self.last_conn.execute(s.strip())
-                self.send_info("variables set!")
-                return {'status': 'ok', 'execution_count': self.execution_count, 'payload': [], 'user_expressions': {}}
-
-            df = pd.read_sql(sql_str, self.last_conn)
-            if sql_is_show(sql_req):
-                if sql_is_show_tables(sql_req):
-                    html = df_to_html(df[df.tab_name.str.contains( extract_show_pattern(sql_req))])
-                if sql_is_show_databases(sql_req):
-                    html = df_to_html(df[df.database_name.str.contains( extract_show_pattern(sql_req))])
-            else:
-                html = df_to_html(df)
 
         except OperationalError as oe:
             return self.send_error(oe)
         except ResourceClosedError as rce:
                 return self.send_error(rce)
-        except MultipleQueriesError as e:
-            return self.send_error("Only one query per cell!")
         except NotAllowedQueriesError as e:
             return self.send_error("only 'select', 'with', 'set property=value', 'create table x.y stored as orc' 'drop table', 'use database', 'show databases', 'show tables', 'describe myTable' statements are allowed")
         except Exception as e:
@@ -225,7 +210,7 @@ class HiveQLKernel(Kernel):
         self.send_response(self.iopub_socket, 'execute_result', {
             "execution_count": self.execution_count,
             'data': {
-                "text/html": html,
+                "text/html": "<\br>".join(self.html),
             },
             "metadata": {
                 "image/png": {
@@ -241,9 +226,11 @@ class HiveQLKernel(Kernel):
             'payload': [],
             'user_expressions': {}
         }
+
 def df_to_html(df):
     #for column in df:
     #    if df[column].dtype == 'object':
     #        df[column] =  df[column].apply(lambda x: x.replace("\n","<br>"))
+    pd.set_option('display.max_colwidth', -1)
     return df.fillna('NULL').astype(str).to_html(notebook=True)
 
